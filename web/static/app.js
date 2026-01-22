@@ -113,8 +113,11 @@ async function handleWebLogin(event) {
         if (data.success) {
             // Successfully authenticated
             showMainApp();
-            // Initialize the app now that we're authenticated
-            initializeApp();
+            // Small delay to ensure session cookie is set before making authenticated requests
+            setTimeout(() => {
+                // Initialize the app now that we're authenticated
+                initializeApp();
+            }, 100);
         } else {
             showWebLoginError(data.message || 'Invalid password');
             passwordInput.value = '';
@@ -130,7 +133,9 @@ async function handleWebLogin(event) {
 
 async function fetchAndDisplayVersion() {
     try {
-        const response = await fetch('/api/version');
+        const response = await fetch('/api/version', {
+            credentials: 'include'  // Important for session cookies
+        });
         if (!response.ok) throw new Error('Failed to fetch version');
 
         const data = await response.json();
@@ -198,7 +203,8 @@ const socket = io({
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     reconnectionAttempts: Infinity,
-    autoConnect: false  // Don't auto-connect, wait for authentication
+    autoConnect: false,  // Don't auto-connect, wait for authentication
+    withCredentials: true  // Important for session cookies
 });
 
 // ==================== Socket.IO Event Handlers ====================
@@ -1775,7 +1781,12 @@ function hideWebPasswordResult() {
 
 async function fetchAndPopulateLanguages() {
     try {
-        const response = await fetch('/api/languages');
+        const response = await fetch('/api/languages', {
+            credentials: 'include'  // Important for session cookies
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
 
         const languageSelect = document.getElementById('language');
@@ -1811,7 +1822,12 @@ async function fetchAndPopulateLanguages() {
 
 async function fetchAndApplyTranslations() {
     try {
-        const response = await fetch('/api/translations');
+        const response = await fetch('/api/translations', {
+            credentials: 'include'  // Important for session cookies
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
 
         state.translations = data;
@@ -2187,6 +2203,10 @@ function initializeApp() {
     
     // Fetch and display version information
     fetchAndDisplayVersion();
+    
+    // Fetch languages and translations (these require authentication)
+    fetchAndPopulateLanguages();
+    fetchAndApplyTranslations();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2306,11 +2326,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         exitManualBtn.addEventListener('click', exitManualMode);
     }
 
-    // Fetch and populate available languages
-    fetchAndPopulateLanguages();
-
-    // Fetch and apply translations for the current language
-    fetchAndApplyTranslations();
+    // Fetch and populate available languages (only if already authenticated)
+    // If authentication is required, these will be called by initializeApp() after login
+    if (state.webAuthenticated) {
+        fetchAndPopulateLanguages();
+        fetchAndApplyTranslations();
+    }
 
     // Request notification permission
     if ('Notification' in window && Notification.permission === 'default') {
