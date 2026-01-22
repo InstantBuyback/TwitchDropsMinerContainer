@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import socketio
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
 
 if TYPE_CHECKING:
@@ -24,6 +27,11 @@ logger = logging.getLogger("TwitchDrops")
 
 # Create FastAPI app
 app = FastAPI(title="Twitch Drops Miner Web", version="1.0.0")
+
+# Add session middleware (must be before CORS)
+# Generate a secret key for sessions (use env var if available, otherwise generate random)
+session_secret = os.getenv("TDM_SESSION_SECRET", secrets.token_urlsafe(32))
+app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=86400 * 30)  # 30 days
 
 # Add CORS middleware
 app.add_middleware(
@@ -63,6 +71,10 @@ class LoginRequest(BaseModel):
     token: str = ""
 
 
+class WebLoginRequest(BaseModel):
+    password: str
+
+
 class ChannelSelectRequest(BaseModel):
     channel_id: int
 
@@ -76,17 +88,93 @@ class SettingsUpdate(BaseModel):
     minimum_refresh_interval_minutes: int | None = None
     inventory_filters: dict | None = None
     mining_benefits: dict[str, bool] | None = None
+    web_password: str | None = None
 
 
 class ProxyVerifyRequest(BaseModel):
     proxy: str
 
 
+# ==================== Authentication ====================
+
+
+def get_web_password() -> str:
+    """Get web password from settings or environment variable"""
+    if not gui_manager:
+        return ""
+    settings = gui_manager.settings.get_settings()
+    password = settings.get("web_password", "")
+    # Check environment variable as override
+    env_password = os.getenv("TDM_WEB_PASSWORD", "")
+    if env_password:
+        password = env_password
+    return password
+
+
+def is_web_auth_enabled() -> bool:
+    """Check if web authentication is enabled"""
+    password = get_web_password()
+    return bool(password and password.strip())
+
+
+async def require_auth(request: Request) -> None:
+    """Dependency to check if user is authenticated"""
+    if not is_web_auth_enabled():
+        return None  # No password set, allow access
+    
+    if request.session.get("authenticated"):
+        return None  # Authenticated, allow access
+    
+    # Allow access to login endpoint, auth status endpoint, and static files
+    if (
+        request.url.path.startswith("/api/web/login")
+        or request.url.path.startswith("/api/web/auth-status")
+        or request.url.path.startswith("/static/")
+    ):
+        return None
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required"
+    )
+
+
 # ==================== REST API Endpoints ====================
 
 
+@app.post("/api/web/login")
+async def web_login(request: Request, login_data: WebLoginRequest):
+    """Authenticate user with web password"""
+    password = get_web_password()
+    
+    if not password or not password.strip():
+        return {"success": False, "message": "Web password not configured"}
+    
+    if login_data.password == password:
+        request.session["authenticated"] = True
+        return {"success": True}
+    else:
+        return {"success": False, "message": "Invalid password"}
+
+
+@app.post("/api/web/logout")
+async def web_logout(request: Request):
+    """Logout user"""
+    request.session.pop("authenticated", None)
+    return {"success": True}
+
+
+@app.get("/api/web/auth-status")
+async def get_auth_status():
+    """Check if web authentication is enabled"""
+    return {
+        "enabled": is_web_auth_enabled(),
+        "has_password": bool(get_web_password())
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
-async def serve_index():
+async def serve_index(request: Request, _: None = Depends(require_auth)):
     """Serve the main web interface"""
     # Web files are in project_root/web/, we're in project_root/src/web/
     web_dir = Path(__file__).parent.parent.parent / "web"
@@ -103,7 +191,7 @@ async def serve_index():
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(_: None = Depends(require_auth)):
     """Get current application status"""
     if not gui_manager or not twitch_client:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -116,7 +204,7 @@ async def get_status():
 
 
 @app.get("/api/channels")
-async def get_channels():
+async def get_channels(_: None = Depends(require_auth)):
     """Get list of tracked channels"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -125,7 +213,7 @@ async def get_channels():
 
 
 @app.post("/api/channels/select")
-async def select_channel(request: ChannelSelectRequest):
+async def select_channel(request: ChannelSelectRequest, _: None = Depends(require_auth)):
     """Select a channel to watch"""
     if not gui_manager or not twitch_client:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -154,7 +242,7 @@ async def select_channel(request: ChannelSelectRequest):
 
 
 @app.get("/api/campaigns")
-async def get_campaigns():
+async def get_campaigns(_: None = Depends(require_auth)):
     """Get campaign inventory"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -163,7 +251,7 @@ async def get_campaigns():
 
 
 @app.get("/api/console")
-async def get_console_history():
+async def get_console_history(_: None = Depends(require_auth)):
     """Get console output history"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -172,7 +260,7 @@ async def get_console_history():
 
 
 @app.get("/api/settings")
-async def get_settings():
+async def get_settings(_: None = Depends(require_auth)):
     """Get current settings"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -181,7 +269,7 @@ async def get_settings():
 
 
 @app.get("/api/languages")
-async def get_languages():
+async def get_languages(_: None = Depends(require_auth)):
     """Get available languages"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -190,7 +278,7 @@ async def get_languages():
 
 
 @app.get("/api/translations")
-async def get_translations():
+async def get_translations(_: None = Depends(require_auth)):
     """Get translations for current language"""
     from src.i18n.translator import _
 
@@ -199,18 +287,31 @@ async def get_translations():
 
 
 @app.post("/api/settings")
-async def update_settings(settings: SettingsUpdate):
+async def update_settings(request: Request, settings: SettingsUpdate, _: None = Depends(require_auth)):
     """Update application settings"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
 
     settings_dict = settings.dict(exclude_unset=True)
+    
+    # Special handling for web_password: allow setting it when auth is disabled
+    # or when authenticated. If setting it when auth was disabled, user will need to log in.
+    if "web_password" in settings_dict and not is_web_auth_enabled():
+        # Auth is currently disabled, allow setting password
+        pass
+    elif "web_password" in settings_dict and not request.session.get("authenticated"):
+        # Trying to set password when auth is enabled but not authenticated
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to change password"
+        )
+    
     gui_manager.settings.update_settings(settings_dict)
     return {"success": True, "settings": gui_manager.settings.get_settings()}
 
 
 @app.post("/api/settings/verify-proxy")
-async def verify_proxy(request: ProxyVerifyRequest):
+async def verify_proxy(request: ProxyVerifyRequest, _: None = Depends(require_auth)):
     """Verify proxy connectivity"""
     import time
 
@@ -245,7 +346,7 @@ async def verify_proxy(request: ProxyVerifyRequest):
 
 
 @app.get("/api/version")
-async def get_version():
+async def get_version(_: None = Depends(require_auth)):
     """Get current application version and check for updates"""
     import aiohttp
 
@@ -284,7 +385,7 @@ async def get_version():
 
 
 @app.post("/api/login")
-async def submit_login(login_data: LoginRequest):
+async def submit_login(login_data: LoginRequest, _: None = Depends(require_auth)):
     """Submit login credentials"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -294,7 +395,7 @@ async def submit_login(login_data: LoginRequest):
 
 
 @app.post("/api/oauth/confirm")
-async def confirm_oauth():
+async def confirm_oauth(_: None = Depends(require_auth)):
     """Confirm OAuth code has been entered by user"""
     if not gui_manager:
         raise HTTPException(status_code=503, detail="GUI not initialized")
@@ -305,7 +406,7 @@ async def confirm_oauth():
 
 
 @app.post("/api/reload")
-async def trigger_reload():
+async def trigger_reload(_: None = Depends(require_auth)):
     """Trigger application reload"""
     if not twitch_client:
         raise HTTPException(status_code=503, detail="Twitch client not initialized")
@@ -317,7 +418,7 @@ async def trigger_reload():
 
 
 @app.post("/api/close")
-async def trigger_close():
+async def trigger_close(_: None = Depends(require_auth)):
     """Trigger application shutdown"""
     if not twitch_client:
         raise HTTPException(status_code=503, detail="Twitch client not initialized")
@@ -327,7 +428,7 @@ async def trigger_close():
 
 
 @app.post("/api/mode/exit-manual")
-async def exit_manual_mode():
+async def exit_manual_mode(_: None = Depends(require_auth)):
     """Exit manual mode and return to automatic channel selection"""
     if not twitch_client:
         raise HTTPException(status_code=503, detail="Twitch client not initialized")
@@ -346,6 +447,22 @@ async def exit_manual_mode():
 async def connect(sid, environ):
     """Client connected"""
     logger.info(f"Web client connected: {sid}")
+    
+    # Check web authentication if enabled
+    if is_web_auth_enabled():
+        # Get session from environ (Socket.IO stores it in environ['asgi.scope'])
+        try:
+            scope = environ.get('asgi.scope', {})
+            session = scope.get('session', {})
+            if not session.get("authenticated"):
+                logger.warning(f"Unauthenticated Socket.IO connection attempt from {sid}")
+                # Disconnect the client
+                await sio.disconnect(sid)
+                return False
+        except Exception as e:
+            logger.warning(f"Error checking Socket.IO authentication: {e}")
+            await sio.disconnect(sid)
+            return False
 
     # Send initial state to new client
     if gui_manager and twitch_client:

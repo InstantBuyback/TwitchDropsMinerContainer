@@ -1567,3 +1567,90 @@ header h1 {
     color: var(--text-primary);
     text-decoration: underline;
 }
+
+/* Web Login Screen */
+.web-login-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.web-login-container {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 40px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+}
+
+.web-login-container h1 {
+    margin: 0 0 20px 0;
+    color: var(--accent-color);
+    font-size: 28px;
+}
+
+.web-login-message {
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+    font-size: 14px;
+}
+
+.web-login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.web-login-form input[type="password"] {
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 16px;
+    transition: border-color 0.2s;
+}
+
+.web-login-form input[type="password"]:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.web-login-form button {
+    padding: 12px;
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.web-login-form button:hover {
+    background: #7c3aed;
+}
+
+.web-login-form button:active {
+    background: #6d28d9;
+}
+
+.web-login-error {
+    color: var(--error-color);
+    font-size: 14px;
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(244, 67, 54, 0.1);
+    border-radius: 4px;
+}

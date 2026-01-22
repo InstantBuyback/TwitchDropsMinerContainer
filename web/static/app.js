@@ -9,8 +9,122 @@ const state = {
     settings: {},
     currentDrop: null,
     countdownTimer: null,  // Track the active countdown timer
-    translations: {}  // Store current translations
+    translations: {},  // Store current translations
+    webAuthenticated: false  // Web password authentication status
 };
+
+// ==================== Web Authentication ====================
+
+async function checkWebAuth() {
+    try {
+        const response = await fetch('/api/web/auth-status');
+        if (!response.ok) {
+            // If we get 401, we need to authenticate
+            if (response.status === 401) {
+                showWebLogin();
+                return false;
+            }
+            throw new Error('Failed to check auth status');
+        }
+        const data = await response.json();
+        if (data.enabled && !data.has_password) {
+            // Auth is enabled but no password set - show error
+            showWebLoginError('Web password not configured on server');
+            return false;
+        }
+        if (!data.enabled) {
+            // No password protection, show main app
+            showMainApp();
+            return true;
+        }
+        // Auth is enabled, check if we're already authenticated
+        // Try to access a protected endpoint to verify session
+        const testResponse = await fetch('/api/status');
+        if (testResponse.ok) {
+            showMainApp();
+            return true;
+        } else if (testResponse.status === 401) {
+            showWebLogin();
+            return false;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error checking web auth:', error);
+        // On error, try to show login screen
+        showWebLogin();
+        return false;
+    }
+}
+
+function showWebLogin() {
+    const loginScreen = document.getElementById('web-login-screen');
+    const mainApp = document.getElementById('main-app');
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (mainApp) mainApp.style.display = 'none';
+}
+
+function showMainApp() {
+    const loginScreen = document.getElementById('web-login-screen');
+    const mainApp = document.getElementById('main-app');
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (mainApp) mainApp.style.display = 'block';
+    state.webAuthenticated = true;
+}
+
+function showWebLoginError(message) {
+    const errorDiv = document.getElementById('web-login-error');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+}
+
+function hideWebLoginError() {
+    const errorDiv = document.getElementById('web-login-error');
+    if (errorDiv) {
+        errorDiv.style.display = 'none';
+    }
+}
+
+async function handleWebLogin(event) {
+    event.preventDefault();
+    hideWebLoginError();
+    
+    const passwordInput = document.getElementById('web-password-input');
+    const password = passwordInput?.value || '';
+    
+    if (!password) {
+        showWebLoginError('Please enter a password');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/web/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',  // Important for session cookies
+            body: JSON.stringify({ password: password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Successfully authenticated
+            showMainApp();
+            // Initialize the app now that we're authenticated
+            initializeApp();
+        } else {
+            showWebLoginError(data.message || 'Invalid password');
+            passwordInput.value = '';
+            passwordInput.focus();
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        showWebLoginError('Failed to connect to server. Please try again.');
+    }
+}
 
 // ==================== Version Checking ====================
 
@@ -77,13 +191,14 @@ async function fetchAndDisplayVersion() {
     }
 }
 
-// Initialize Socket.IO connection
+// Initialize Socket.IO connection (will connect after authentication)
 const socket = io({
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    reconnectionAttempts: Infinity
+    reconnectionAttempts: Infinity,
+    autoConnect: false  // Don't auto-connect, wait for authentication
 });
 
 // ==================== Socket.IO Event Handlers ====================
@@ -1903,8 +2018,33 @@ function switchTab(tabName) {
 
 // ==================== Event Listeners ====================
 
-document.addEventListener('DOMContentLoaded', () => {
+// Initialize the main application (called after authentication)
+function initializeApp() {
+    // Initialize Socket.IO connection (only after authentication)
+    if (!socket.connected) {
+        socket.connect();
+    }
+    
     // Fetch and display version information
+    fetchAndDisplayVersion();
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // Set up web login form handler
+    const webLoginForm = document.getElementById('web-login-form');
+    if (webLoginForm) {
+        webLoginForm.addEventListener('submit', handleWebLogin);
+    }
+    
+    // Check web authentication first
+    const authenticated = await checkWebAuth();
+    if (authenticated) {
+        // Already authenticated, initialize the app
+        initializeApp();
+    }
+    // If not authenticated, the login screen is already shown by checkWebAuth()
+    
+    // Fetch and display version information (even if not authenticated, for login screen)
     fetchAndDisplayVersion();
 
     // Tab switching

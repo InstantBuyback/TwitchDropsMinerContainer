@@ -47,6 +47,7 @@ default_settings = {
         "UNKNOWN": True,
     },
     "proxy": "",
+    "web_password": "",
 }
 
 
@@ -60,6 +61,7 @@ class Settings:
     minimum_refresh_interval_minutes: int
     mining_benefits: dict[str, bool]
     proxy: str
+    web_password: str
 
     def __init__(self):
         self.load()
@@ -67,6 +69,11 @@ class Settings:
     def load(self):
         # TODO: remvoe customized serde in the future
         settings = json_load(SETTINGS_PATH, default_settings, merge=True)
+        # Check for web_password from environment variable (for Docker/security)
+        import os
+        env_password = os.getenv("TDM_WEB_PASSWORD", "")
+        if env_password:
+            settings["web_password"] = env_password
         for key, value in settings.items():
             if value is URL:
                 setattr(self, key, str(value))

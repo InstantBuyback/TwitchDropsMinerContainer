@@ -11,7 +11,21 @@
 </head>
 
 <body>
-    <div class="container">
+    <!-- Web Login Screen -->
+    <div id="web-login-screen" class="web-login-screen" style="display: none;">
+        <div class="web-login-container">
+            <h1>🎮 Twitch Drops Miner</h1>
+            <p class="web-login-message">Please enter the password to access the interface</p>
+            <form id="web-login-form" class="web-login-form">
+                <input type="password" id="web-password-input" placeholder="Password" autocomplete="current-password" required autofocus />
+                <button type="submit" id="web-login-button">Login</button>
+                <div id="web-login-error" class="web-login-error" style="display: none;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Application (hidden until authenticated) -->
+    <div id="main-app" class="container" style="display: none;">
         <header>
             <div class="header-top">
                 <h1>🎮 Twitch Drops Miner</h1>
