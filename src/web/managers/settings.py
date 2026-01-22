@@ -101,6 +101,12 @@ class SettingsManager:
         should_trigger_update |= self.check_and_update_setting(
             "mining_benefits", settings_data.get("mining_benefits"), True
         )
+        # Handle web_password (security setting)
+        if "web_password" in settings_data:
+            web_password_value = settings_data["web_password"]
+            should_trigger_update |= self.check_and_update_setting(
+                "web_password", web_password_value
+            )
 
         self._settings.save()
         asyncio.create_task(self._broadcaster.emit("settings_updated", self.get_settings()))

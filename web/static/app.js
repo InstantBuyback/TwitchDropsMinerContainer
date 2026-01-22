@@ -1185,8 +1185,10 @@ function updateSettingsUI(settings) {
     }
 
     // Update web password settings
-    const webPassword = settings.web_password || '';
-    const passwordEnabled = webPassword && webPassword.trim() !== '';
+    // Note: web_password will be in settings if it exists (even if empty string)
+    const webPassword = settings.web_password;
+    // Password is enabled if it exists and is not empty
+    const passwordEnabled = webPassword !== undefined && webPassword !== null && webPassword.trim() !== '';
     const passwordEnabledCheckbox = document.getElementById('web-password-enabled');
     const passwordSettingsDiv = document.getElementById('web-password-settings');
     
@@ -1708,21 +1710,33 @@ async function setWebPassword() {
         });
         
         if (response.ok) {
+            const responseData = await response.json();
+            
             // Clear password fields
             if (newPasswordInput) newPasswordInput.value = '';
             if (confirmPasswordInput) confirmPasswordInput.value = '';
             
-            // Ensure checkbox is checked
+            // Update UI with the returned settings (which should include the password)
+            if (responseData.settings) {
+                updateSettingsUI(responseData.settings);
+            } else {
+                // Fallback: reload settings if not in response
+                const settingsResponse = await fetch('/api/settings', { credentials: 'include' });
+                if (settingsResponse.ok) {
+                    const data = await settingsResponse.json();
+                    updateSettingsUI(data);
+                }
+            }
+            
+            // Verify checkbox state after UI update (updateSettingsUI should have set it correctly)
             const enabledCheckbox = document.getElementById('web-password-enabled');
             const passwordSettingsDiv = document.getElementById('web-password-settings');
-            if (enabledCheckbox) enabledCheckbox.checked = true;
-            if (passwordSettingsDiv) passwordSettingsDiv.style.display = 'block';
-            
-            // Reload settings to update UI
-            const settingsResponse = await fetch('/api/settings', { credentials: 'include' });
-            if (settingsResponse.ok) {
-                const data = await settingsResponse.json();
-                updateSettingsUI(data);
+            // Force checkbox to checked state if password was just set
+            if (enabledCheckbox && !enabledCheckbox.checked) {
+                enabledCheckbox.checked = true;
+            }
+            if (passwordSettingsDiv) {
+                passwordSettingsDiv.style.display = 'block';
             }
             
             showWebPasswordResult('Password set successfully', 'success');
