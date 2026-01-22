@@ -125,9 +125,11 @@ async def require_auth(request: Request) -> None:
     if request.session.get("authenticated"):
         return None  # Authenticated, allow access
     
-    # Allow access to login endpoint, auth status endpoint, and static files
+    # Allow access to root path (for HTML page), login endpoint, auth status endpoint, and static files
+    # The JavaScript will handle showing the login screen
     if (
-        request.url.path.startswith("/api/web/login")
+        request.url.path == "/"
+        or request.url.path.startswith("/api/web/login")
         or request.url.path.startswith("/api/web/auth-status")
         or request.url.path.startswith("/static/")
     ):
@@ -174,7 +176,7 @@ async def get_auth_status():
 
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_index(request: Request, _: None = Depends(require_auth)):
+async def serve_index(request: Request):
     """Serve the main web interface"""
     # Web files are in project_root/web/, we're in project_root/src/web/
     web_dir = Path(__file__).parent.parent.parent / "web"
