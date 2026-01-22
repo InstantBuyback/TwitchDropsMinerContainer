@@ -111,13 +111,16 @@ async function handleWebLogin(event) {
         const data = await response.json();
         
         if (data.success) {
-            // Successfully authenticated
+            // Successfully authenticated - show main app UI
             showMainApp();
-            // Small delay to ensure session cookie is set before making authenticated requests
-            setTimeout(() => {
-                // Initialize the app now that we're authenticated
-                initializeApp();
-            }, 100);
+            
+            // Initialize the app now that we're authenticated
+            // Wait for everything to load before considering it ready
+            initializeApp().then(() => {
+                console.log('App initialization complete');
+            }).catch((error) => {
+                console.error('App initialization failed:', error);
+            });
         } else {
             showWebLoginError(data.message || 'Invalid password');
             passwordInput.value = '';
@@ -1785,6 +1788,9 @@ async function fetchAndPopulateLanguages() {
             credentials: 'include'  // Important for session cookies
         });
         if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Authentication required');
+            }
             throw new Error(`HTTP ${response.status}`);
         }
         const data = await response.json();
@@ -1826,6 +1832,9 @@ async function fetchAndApplyTranslations() {
             credentials: 'include'  // Important for session cookies
         });
         if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Authentication required');
+            }
             throw new Error(`HTTP ${response.status}`);
         }
         const data = await response.json();
@@ -2195,18 +2204,134 @@ function switchTab(tabName) {
 // ==================== Event Listeners ====================
 
 // Initialize the main application (called after authentication)
-function initializeApp() {
-    // Initialize Socket.IO connection (only after authentication)
-    if (!socket.connected) {
-        socket.connect();
+async function initializeApp() {
+    console.log('Starting app initialization...');
+    
+    // Step 1: Fetch languages and translations first (needed for UI)
+    try {
+        await fetchAndPopulateLanguages();
+        await fetchAndApplyTranslations();
+        console.log('Languages and translations loaded');
+    } catch (error) {
+        console.error('Failed to load languages/translations:', error);
     }
     
-    // Fetch and display version information
-    fetchAndDisplayVersion();
+    // Step 2: Fetch and display version information
+    try {
+        await fetchAndDisplayVersion();
+        console.log('Version information loaded');
+    } catch (error) {
+        console.error('Failed to load version:', error);
+    }
     
-    // Fetch languages and translations (these require authentication)
-    fetchAndPopulateLanguages();
-    fetchAndApplyTranslations();
+    // Step 3: Connect Socket.IO and wait for initial_state (which includes settings and all data)
+    // This is the primary way to get all the app data
+    return new Promise((resolve) => {
+        let initialStateReceived = false;
+        let connectionEstablished = false;
+        
+        // Set up one-time listener for initial_state
+        const onInitialState = (data) => {
+            if (initialStateReceived) return;
+            initialStateReceived = true;
+            console.log('Received initial state from Socket.IO');
+            // initial_state handler will update all UI including settings
+            socket.off('initial_state', onInitialState);
+            socket.off('connect', onConnect);
+            socket.off('connect_error', onError);
+            resolve();
+        };
+        
+        // Set up one-time listener for connection
+        const onConnect = () => {
+            console.log('Socket.IO connected, waiting for initial_state...');
+            connectionEstablished = true;
+            // initial_state should arrive shortly after connection
+        };
+        
+        const onError = (error) => {
+            console.error('Socket.IO connection error:', error);
+            socket.off('initial_state', onInitialState);
+            socket.off('connect', onConnect);
+            socket.off('connect_error', onError);
+            
+            // Fallback: Load settings via API if Socket.IO fails
+            fetch('/api/settings', { credentials: 'include' })
+                .then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                    throw new Error('Failed to fetch settings');
+                })
+                .then(settingsData => {
+                    updateSettingsUI(settingsData);
+                    console.log('Settings loaded via API fallback');
+                })
+                .catch(err => {
+                    console.error('Failed to load settings via API:', err);
+                });
+            
+            resolve();
+        };
+        
+        if (socket.connected) {
+            console.log('Socket.IO already connected, waiting for initial_state...');
+            // If already connected, initial_state might have been missed, so fetch settings via API
+            socket.once('initial_state', onInitialState);
+            
+            // Also fetch settings as fallback
+            fetch('/api/settings', { credentials: 'include' })
+                .then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                    throw new Error('Failed to fetch settings');
+                })
+                .then(settingsData => {
+                    updateSettingsUI(settingsData);
+                    console.log('Settings loaded via API (Socket.IO already connected)');
+                })
+                .catch(err => {
+                    console.error('Failed to load settings:', err);
+                });
+        } else {
+            socket.once('initial_state', onInitialState);
+            socket.once('connect', onConnect);
+            socket.once('connect_error', onError);
+            
+            // Start connection
+            console.log('Connecting Socket.IO...');
+            socket.connect();
+        }
+        
+        // Timeout after 10 seconds - if initial_state doesn't arrive, use API fallback
+        setTimeout(() => {
+            if (!initialStateReceived) {
+                console.warn('Socket.IO initial_state timeout, using API fallback');
+                socket.off('initial_state', onInitialState);
+                socket.off('connect', onConnect);
+                socket.off('connect_error', onError);
+                
+                // Fallback: Load settings via API
+                fetch('/api/settings', { credentials: 'include' })
+                    .then(response => {
+                        if (response.ok) {
+                            return response.json();
+                        }
+                        throw new Error('Failed to fetch settings');
+                    })
+                    .then(settingsData => {
+                        updateSettingsUI(settingsData);
+                        console.log('Settings loaded via API fallback (timeout)');
+                    })
+                    .catch(err => {
+                        console.error('Failed to load settings via API:', err);
+                    });
+                
+                resolve();
+            }
+        }, 10000);
+    });
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2220,12 +2345,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const authenticated = await checkWebAuth();
     if (authenticated) {
         // Already authenticated, initialize the app
-        initializeApp();
+        initializeApp().then(() => {
+            console.log('App initialization complete');
+        }).catch((error) => {
+            console.error('App initialization failed:', error);
+        });
+    } else {
+        // If not authenticated, the login screen is already shown by checkWebAuth()
+        // Still fetch version for login screen (doesn't require auth)
+        fetchAndDisplayVersion();
     }
-    // If not authenticated, the login screen is already shown by checkWebAuth()
-    
-    // Fetch and display version information (even if not authenticated, for login screen)
-    fetchAndDisplayVersion();
 
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(button => {
