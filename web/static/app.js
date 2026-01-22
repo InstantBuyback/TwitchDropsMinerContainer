@@ -1184,6 +1184,20 @@ function updateSettingsUI(settings) {
         document.body.classList.remove('dark-mode');
     }
 
+    // Update web password settings
+    const webPassword = settings.web_password || '';
+    const passwordEnabled = webPassword && webPassword.trim() !== '';
+    const passwordEnabledCheckbox = document.getElementById('web-password-enabled');
+    const passwordSettingsDiv = document.getElementById('web-password-settings');
+    
+    if (passwordEnabledCheckbox) {
+        passwordEnabledCheckbox.checked = passwordEnabled;
+    }
+    
+    if (passwordSettingsDiv) {
+        passwordSettingsDiv.style.display = passwordEnabled ? 'block' : 'none';
+    }
+
     // Update available games if provided in settings
     if (settings.games_available) {
         availableGames = new Set(settings.games_available);
@@ -1605,11 +1619,143 @@ async function saveSettings() {
         await fetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(settings)
         });
         console.log('Settings saved automatically');
     } catch (error) {
         console.error('Failed to save settings:', error);
+    }
+}
+
+async function toggleWebPassword() {
+    const enabledCheckbox = document.getElementById('web-password-enabled');
+    if (!enabledCheckbox) return;
+    
+    const enabled = enabledCheckbox.checked;
+    const passwordSettingsDiv = document.getElementById('web-password-settings');
+    
+    if (passwordSettingsDiv) {
+        passwordSettingsDiv.style.display = enabled ? 'block' : 'none';
+    }
+    
+    // If disabling, set password to empty string
+    if (!enabled) {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ web_password: '' })
+            });
+            
+            // Clear password fields
+            const newPasswordInput = document.getElementById('web-password-new');
+            const confirmPasswordInput = document.getElementById('web-password-confirm');
+            if (newPasswordInput) newPasswordInput.value = '';
+            if (confirmPasswordInput) confirmPasswordInput.value = '';
+            hideWebPasswordResult();
+            
+            // Reload settings to update UI
+            const response = await fetch('/api/settings', { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                updateSettingsUI(data);
+            }
+            
+            showWebPasswordResult('Password protection disabled', 'success');
+        } catch (error) {
+            console.error('Failed to disable password protection:', error);
+            showWebPasswordResult('Failed to disable password protection', 'error');
+            // Revert checkbox
+            document.getElementById('web-password-enabled').checked = true;
+            if (passwordSettingsDiv) passwordSettingsDiv.style.display = 'block';
+        }
+    }
+}
+
+async function setWebPassword() {
+    const newPasswordInput = document.getElementById('web-password-new');
+    const confirmPasswordInput = document.getElementById('web-password-confirm');
+    if (!newPasswordInput || !confirmPasswordInput) return;
+    
+    const newPassword = newPasswordInput.value;
+    const confirmPassword = confirmPasswordInput.value;
+    
+    hideWebPasswordResult();
+    
+    if (!newPassword) {
+        showWebPasswordResult('Please enter a password', 'error');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        showWebPasswordResult('Passwords do not match', 'error');
+        return;
+    }
+    
+    if (newPassword.length < 4) {
+        showWebPasswordResult('Password must be at least 4 characters', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ web_password: newPassword })
+        });
+        
+        if (response.ok) {
+            // Clear password fields
+            if (newPasswordInput) newPasswordInput.value = '';
+            if (confirmPasswordInput) confirmPasswordInput.value = '';
+            
+            // Ensure checkbox is checked
+            const enabledCheckbox = document.getElementById('web-password-enabled');
+            const passwordSettingsDiv = document.getElementById('web-password-settings');
+            if (enabledCheckbox) enabledCheckbox.checked = true;
+            if (passwordSettingsDiv) passwordSettingsDiv.style.display = 'block';
+            
+            // Reload settings to update UI
+            const settingsResponse = await fetch('/api/settings', { credentials: 'include' });
+            if (settingsResponse.ok) {
+                const data = await settingsResponse.json();
+                updateSettingsUI(data);
+            }
+            
+            showWebPasswordResult('Password set successfully', 'success');
+        } else {
+            const error = await response.json().catch(() => ({ detail: 'Failed to set password' }));
+            showWebPasswordResult(error.detail || 'Failed to set password', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to set password:', error);
+        showWebPasswordResult('Failed to set password', 'error');
+    }
+}
+
+function showWebPasswordResult(message, type) {
+    const resultDiv = document.getElementById('web-password-result');
+    if (resultDiv) {
+        resultDiv.textContent = message;
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'verify-result ' + (type === 'success' ? 'success' : 'error');
+        
+        // Auto-hide after 5 seconds for success messages
+        if (type === 'success') {
+            setTimeout(() => {
+                hideWebPasswordResult();
+            }, 5000);
+        }
+    }
+}
+
+function hideWebPasswordResult() {
+    const resultDiv = document.getElementById('web-password-result');
+    if (resultDiv) {
+        resultDiv.style.display = 'none';
     }
 }
 
@@ -2085,6 +2231,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('verify-proxy-btn').addEventListener('click', verifyProxy);
     document.getElementById('reload-btn').addEventListener('click', reloadCampaigns);
+
+    // Security settings
+    const passwordEnabledCheckbox = document.getElementById('web-password-enabled');
+    const setPasswordBtn = document.getElementById('set-web-password-btn');
+    if (passwordEnabledCheckbox) {
+        passwordEnabledCheckbox.addEventListener('change', toggleWebPassword);
+    }
+    if (setPasswordBtn) {
+        setPasswordBtn.addEventListener('click', setWebPassword);
+    }
 
 
     // Games to watch management

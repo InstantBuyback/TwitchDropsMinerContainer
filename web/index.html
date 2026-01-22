@@ -273,6 +273,27 @@
                 </section>
 
                 <section class="settings-section">
+                    <h2 id="settings-security-header">Security</h2>
+                    <label>
+                        <input type="checkbox" id="web-password-enabled"> Enable Password Protection
+                    </label>
+                    <small class="help-text-inline" style="margin-top: 5px; display: block;">When enabled, users must enter a password to access the web interface.</small>
+                    
+                    <div id="web-password-settings" style="display: none; margin-top: 20px;">
+                        <label>
+                            New Password:
+                            <input type="password" id="web-password-new" placeholder="Enter new password" autocomplete="new-password" />
+                        </label>
+                        <label>
+                            Confirm Password:
+                            <input type="password" id="web-password-confirm" placeholder="Confirm new password" autocomplete="new-password" />
+                        </label>
+                        <button id="set-web-password-btn" class="secondary-btn" style="margin-top: 10px;">Set Password</button>
+                        <div id="web-password-result" class="verify-result" style="display: none; margin-top: 10px;"></div>
+                    </div>
+                </section>
+
+                <section class="settings-section">
                     <h2 id="settings-actions-header">Actions</h2>
                     <div class="settings-actions">
                         <button id="reload-btn" class="action-button">Reload</button>
